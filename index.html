@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Konno Game Start</title>
+  <style>
+    canvas {
+      background-image: url('background.png');
+      background-size: 400px 400px; /* Exact canvas dimensions */
+      background-repeat: no-repeat;
+      background-position: center;
+      display: block;
+      margin: 100px auto 0 auto; /* 100px отгоре, центрирано по хоризонтала */
+      border: 2px solid #333;
+    }
+    #konnoVideo {
+      display: none; /* Hide the video element */
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="400"></canvas>
+<video id="konnoVideo" width="64" height="64" autoplay loop muted>
+  <source src="Konno.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  const video = document.getElementById("konnoVideo");
+ 
+  const konno = {
+    x: 100,
+    y: 250,
+    width: 64,
+    height: 64,
+    video: video,
+    facingRight: true // Track which direction Konno is facing
+  };
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") {
+      konno.x += 10;
+      konno.facingRight = false; // Face left when moving right
+    }
+    if (e.key === "ArrowLeft") {
+      konno.x -= 10;
+      konno.facingRight = true; // Face right when moving left
+    }
+  });
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw the video frame onto the canvas
+    if (video.readyState >= 2) { // Check if video has loaded enough data
+      ctx.save(); // Save the current canvas state
+      
+      if (!konno.facingRight) {
+        // Flip horizontally when facing left
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -konno.x - konno.width, konno.y, konno.width, konno.height);
+      } else {
+        // Draw normally when facing right
+        ctx.drawImage(video, konno.x, konno.y, konno.width, konno.height);
+      }
+      
+      ctx.restore(); // Restore the canvas state
+    }
+    
+    requestAnimationFrame(draw);
+  }
+
+  // Start drawing when video can play
+  video.addEventListener('canplay', () => {
+    draw();
+  });
+
+  // Start the video
+  video.play();
+</script>
+</body>
+</html>
