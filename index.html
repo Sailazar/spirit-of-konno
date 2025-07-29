@@ -6,20 +6,22 @@
   <style>
     canvas {
       background-image: url('background.png');
-      background-size: 400px 400px; /* Exact canvas dimensions */
+      background-size: 400px 400px;
       background-repeat: no-repeat;
       background-position: center;
       display: block;
-      margin: 100px auto 0 auto; /* 100px отгоре, центрирано по хоризонтала */
+      margin: 100px auto 0 auto;
       border: 2px solid #333;
     }
     #konnoVideo {
-      display: none; /* Hide the video element */
+      display: none;
     }
   </style>
 </head>
 <body>
+
 <canvas id="gameCanvas" width="400" height="400"></canvas>
+
 <video id="konnoVideo" width="64" height="64" autoplay loop muted>
   <source src="Konno.mp4" type="video/mp4">
   Your browser does not support the video tag.
@@ -29,56 +31,173 @@
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
   const video = document.getElementById("konnoVideo");
- 
+
+  const bgLayers = [
+    { src: 'layer1.png', x: 0, y: 0, speed: 0.003, img: new Image() },
+    { src: 'layer2.png', x: 0, y: 0, speed: 0.006, img: new Image() },
+    { src: 'layer3.png', x: 0, y: 0, speed: 0.009, img: new Image() }
+  ];
+  bgLayers.forEach(layer => { layer.img.src = layer.src; });
+
   const konno = {
     x: 100,
     y: 250,
     width: 64,
     height: 64,
     video: video,
-    facingRight: true // Track which direction Konno is facing
+    facingRight: true,
+    jumping: false
   };
 
+  // Track which keys are held down
+  const keys = { a: false, d: false, w: false, s: false };
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight") {
-      konno.x += 10;
-      konno.facingRight = false; // Face left when moving right
+    if (e.key === "a") {
+      keys.a = true;
+      konno.facingRight = true;
     }
-    if (e.key === "ArrowLeft") {
-      konno.x -= 10;
-      konno.facingRight = true; // Face right when moving left
+    if (e.key === "d") {
+      keys.d = true;
+      konno.facingRight = false;
+    }
+    if (e.key === "w") keys.w = true;
+    if (e.key === "s") keys.s = true;
+    if (e.code === "Space" && !konno.jumping) {
+      konno.jumping = true;
+
+      video.src = "KonnoJump.mp4";
+      video.loop = false;
+      video.currentTime = 0;
+      video.play();
+
+      if (konno.facingRight) {
+        bgLayers.forEach(layer => {
+          layer.x -= layer.speed * 1500;
+        });
+      } else {
+        bgLayers.forEach(layer => {
+          layer.x += layer.speed * 1500;
+        });
+      }
+
+      // Add cooldown to avoid retrigger
+      const jumpDuration = 1600; // ms – adjust if needed
+      setTimeout(() => {
+        video.src = "Konno.mp4";
+        video.loop = true;
+        video.play();
+        konno.jumping = false;
+      }, jumpDuration);
     }
   });
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "a") keys.a = false;
+    if (e.key === "d") keys.d = false;
+    if (e.key === "w") keys.w = false;
+    if (e.key === "s") keys.s = false;
+  });
+
+  function drawParallax() {
+    bgLayers.forEach(layer => {
+      if (layer.x >= canvas.width) layer.x -= canvas.width;
+      else if (layer.x <= -canvas.width) layer.x += canvas.width;
+      if (layer.y >= canvas.height) layer.y -= canvas.height;
+      else if (layer.y <= -canvas.height) layer.y += canvas.height;
+    });
+
+    bgLayers.forEach(layer => {
+      const pos1x = layer.x, pos1y = layer.y;
+      const pos2x = layer.x - canvas.width, pos2y = layer.y - canvas.height;
+      const pos3x = layer.x + canvas.width, pos3y = layer.y + canvas.height;
+
+      ctx.drawImage(layer.img, pos1x, pos1y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width) ctx.drawImage(layer.img, pos2x, pos1y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2) ctx.drawImage(layer.img, pos3x, pos1y, canvas.width, canvas.height);
+      if (pos2y > -canvas.height) ctx.drawImage(layer.img, pos1x, pos2y, canvas.width, canvas.height);
+      if (pos3y < canvas.height * 2) ctx.drawImage(layer.img, pos1x, pos3y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width && pos2y > -canvas.height) ctx.drawImage(layer.img, pos2x, pos2y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2 && pos3y < canvas.height * 2) ctx.drawImage(layer.img, pos3x, pos3y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width && pos3y < canvas.height * 2) ctx.drawImage(layer.img, pos2x, pos3y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2 && pos2y > -canvas.height) ctx.drawImage(layer.img, pos3x, pos2y, canvas.width, canvas.height);
+    });
+  }
+
+  function isMoving() {
+    return keys.a || keys.d || keys.w || keys.s;
+  }
 
   function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw the video frame onto the canvas
-    if (video.readyState >= 2) { // Check if video has loaded enough data
-      ctx.save(); // Save the current canvas state
-      
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Move backgrounds if keys are held
+    if (keys.a) {
+      bgLayers.forEach(layer => {
+        layer.x += layer.speed * 12; // Adjust speed for smoothness
+      });
+    }
+    if (keys.d) {
+      bgLayers.forEach(layer => {
+        layer.x -= layer.speed * 12;
+      });
+    }
+    if (keys.w) {
+      bgLayers.forEach(layer => {
+        layer.y += layer.speed * 8; // Down (Konno up)
+      });
+    }
+    if (keys.s) {
+      bgLayers.forEach(layer => {
+        layer.y -= layer.speed * 8; // Up (Konno down)
+      });
+    }
+
+    drawParallax();
+
+    if (!konno.jumping) {
+      if (isMoving()) {
+        if (video.src.indexOf("Konno.mp4") === -1) {
+          video.src = "Konno.mp4";
+          video.loop = true;
+          video.play();
+        }
+      } else {
+        if (video.src.indexOf("KonnoStay.mp4") === -1) {
+          video.src = "KonnoStay.mp4";
+          video.loop = true;
+          video.play();
+        }
+      }
+    }
+
+    if (video.readyState >= 2) {
+      ctx.save();
       if (!konno.facingRight) {
-        // Flip horizontally when facing left
         ctx.scale(-1, 1);
         ctx.drawImage(video, -konno.x - konno.width, konno.y, konno.width, konno.height);
       } else {
-        // Draw normally when facing right
         ctx.drawImage(video, konno.x, konno.y, konno.width, konno.height);
       }
-      
-      ctx.restore(); // Restore the canvas state
+      ctx.restore();
     }
-    
+
     requestAnimationFrame(draw);
   }
 
-  // Start drawing when video can play
-  video.addEventListener('canplay', () => {
-    draw();
+  let loadedCount = 0;
+  bgLayers.forEach(layer => {
+    layer.img.onload = () => {
+      loadedCount++;
+      if (loadedCount === bgLayers.length) {
+        video.addEventListener('canplay', () => {
+          draw();
+        });
+        video.play();
+      }
+    };
   });
-
-  // Start the video
-  video.play();
 </script>
+
 </body>
 </html>
