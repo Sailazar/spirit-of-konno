@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Konno Game Start</title>
+  <title>Konno Game with Flying Mode</title>
   <style>
     canvas {
       background-image: url('background.png');
@@ -13,7 +13,18 @@
       margin: 100px auto 0 auto;
       border: 2px solid #333;
     }
-    #konnoVideo {
+    #konnoVideo, #treeGrassVideo {
+      display: none;
+    }
+    #flyingIndicator {
+      position: absolute;
+      top: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #00ff00;
+      font-size: 18px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
       display: none;
     }
   </style>
@@ -21,9 +32,20 @@
 <body>
 
 <canvas id="gameCanvas" width="400" height="400"></canvas>
+<div id="flyingIndicator">FLYING MODE</div>
 
 <video id="konnoVideo" width="64" height="64" autoplay loop muted>
   <source src="Konno.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+<video id="treeGrassVideo" width="400" height="400" autoplay loop muted>
+  <source src="trees_grass_animation.mp4.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+<video id="treeGrowVideo" width="128" height="128" autoplay muted style="display:none;">
+  <source src="tree_grow.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -31,6 +53,9 @@
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
   const video = document.getElementById("konnoVideo");
+  const treeGrassVideo = document.getElementById("treeGrassVideo");
+  const flyingIndicator = document.getElementById("flyingIndicator");
+  const treeGrowVideo = document.getElementById("treeGrowVideo");
 
   const bgLayers = [
     { src: 'layer1.png', x: 0, y: 0, speed: 0.003, img: new Image() },
@@ -39,6 +64,15 @@
   ];
   bgLayers.forEach(layer => { layer.img.src = layer.src; });
 
+  // Animated video layer for trees and grass
+  const animatedLayer = {
+    x: 0,
+    y: 0,
+    speed: 0.015,
+    video: treeGrassVideo,
+    opacity: 0.85
+  };
+
   const konno = {
     x: 100,
     y: 250,
@@ -46,11 +80,24 @@
     height: 64,
     video: video,
     facingRight: true,
-    jumping: false
+    jumping: false,
+    flying: false,
+    flyingHold: false,
+    landing: false
   };
 
-  // Track which keys are held down
+  // Tree system - stores trees in world coordinates
+  const trees = [];
+  
+  // World offset to track camera position
+  const worldOffset = { x: 0, y: 0 };
+
+  // Track which keys are held down and timing
   const keys = { a: false, d: false, w: false, s: false };
+  let wHoldTime = 0;
+  const FLYING_THRESHOLD = 1500; // Hold W for 1.5 seconds to start flying
+  const FLYING_HOLD_THRESHOLD = 6000; // Hold W for 3 seconds total to enter hold flying
+  let lastFrameTime = performance.now();
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "a") {
@@ -62,8 +109,14 @@
       konno.facingRight = false;
     }
     if (e.key === "w") keys.w = true;
-    if (e.key === "s") keys.s = true;
-    if (e.code === "Space" && !konno.jumping) {
+    if (e.key === "s") {
+      keys.s = true;
+      // If flying and pressing S, land immediately
+      if (konno.flying || konno.flyingHold) {
+        landFromFlying();
+      }
+    }
+    if (e.code === "Space" && !konno.jumping && !konno.flying && !konno.landing) {
       konno.jumping = true;
 
       video.src = "KonnoJump.mp4";
@@ -75,14 +128,17 @@
         bgLayers.forEach(layer => {
           layer.x -= layer.speed * 1500;
         });
+        animatedLayer.x -= animatedLayer.speed * 3500;
+        worldOffset.x += 1500 * 0.009; // Use highest speed layer for world tracking
       } else {
         bgLayers.forEach(layer => {
           layer.x += layer.speed * 1500;
         });
+        animatedLayer.x += animatedLayer.speed * 3500;
+        worldOffset.x -= 1500 * 0.009;
       }
 
-      // Add cooldown to avoid retrigger
-      const jumpDuration = 1600; // ms – adjust if needed
+      const jumpDuration = 1900;
       setTimeout(() => {
         video.src = "Konno.mp4";
         video.loop = true;
@@ -90,15 +146,114 @@
         konno.jumping = false;
       }, jumpDuration);
     }
+    if (e.key === "g") {
+      // Create a new tree at Konno's current world position
+      const newTree = {
+        worldX: konno.x - worldOffset.x, // Convert screen position to world position
+        worldY: konno.y - worldOffset.y,
+        width: 128,
+        height: 128,
+        growing: true,
+        grown: false,
+        startTime: performance.now()
+      };
+      trees.push(newTree);
+      
+      // Start the tree grow video
+      treeGrowVideo.currentTime = 0;
+      treeGrowVideo.play();
+    }
   });
+
   document.addEventListener("keyup", (e) => {
     if (e.key === "a") keys.a = false;
     if (e.key === "d") keys.d = false;
-    if (e.key === "w") keys.w = false;
+    if (e.key === "w") {
+      keys.w = false;
+      wHoldTime = 0; // Reset hold time when W is released
+      // When W is released, exit flying modes and go to landing animation
+      if (konno.flying || konno.flyingHold) {
+        landFromFlying();
+      }
+    }
     if (e.key === "s") keys.s = false;
   });
 
+  function startFlying() {
+    if (!konno.flying && !konno.jumping && !konno.landing) {
+      konno.flying = true;
+      video.src = "KonnoFly.mp4"; // Initial flying animation
+      video.loop = true;
+      video.currentTime = 0;
+      video.play();
+      flyingIndicator.style.display = 'block';
+    }
+  }
+
+  function startFlyingHold() {
+    if (konno.flying && !konno.flyingHold) {
+      konno.flyingHold = true;
+      video.src = "KonnoFlyHold.mp4"; // Extended flying animation
+      video.loop = true;
+      video.currentTime = 0;
+      video.play();
+    }
+  }
+
+  function landFromFlying() {
+    if (konno.flying || konno.flyingHold) {
+      konno.flying = false;
+      konno.flyingHold = false;
+      konno.landing = true;
+      wHoldTime = 0;
+      
+      // Play landing animation
+      video.src = "KonnoLand.mp4";
+      video.loop = false;
+      video.currentTime = 0;
+      video.play();
+      flyingIndicator.style.display = 'none';
+      
+      // Set up event listener for when landing animation ends
+      const handleLandingEnd = () => {
+        video.removeEventListener('ended', handleLandingEnd);
+        if (konno.landing) { // Double check we're still in landing state
+          konno.landing = false;
+          // Check if moving to determine next video
+          if (isMoving()) {
+            video.src = "Konno.mp4";
+          } else {
+            video.src = "KonnoStay.mp4";
+          }
+          video.loop = true;
+          video.currentTime = 0;
+          video.play();
+        }
+      };
+      
+      video.addEventListener('ended', handleLandingEnd);
+      
+      // Fallback timeout in case the 'ended' event doesn't fire
+      setTimeout(() => {
+        if (konno.landing) {
+          video.removeEventListener('ended', handleLandingEnd);
+          konno.landing = false;
+          // Check if moving to determine next video
+          if (isMoving()) {
+            video.src = "Konno.mp4";
+          } else {
+            video.src = "KonnoStay.mp4";
+          }
+          video.loop = true;
+          video.currentTime = 0;
+          video.play();
+        }
+      }, 4000); // Increased timeout duration for safety
+    }
+  }
+
   function drawParallax() {
+    // Draw static image layers
     bgLayers.forEach(layer => {
       if (layer.x >= canvas.width) layer.x -= canvas.width;
       else if (layer.x <= -canvas.width) layer.x += canvas.width;
@@ -123,39 +278,150 @@
     });
   }
 
+  function drawAnimatedLayer() {
+    // Handle wrapping for animated layer
+    if (animatedLayer.x >= canvas.width) animatedLayer.x -= canvas.width;
+    else if (animatedLayer.x <= -canvas.width) animatedLayer.x += canvas.width;
+    if (animatedLayer.y >= canvas.height) animatedLayer.y -= canvas.height;
+    else if (animatedLayer.y <= -canvas.height) animatedLayer.y += canvas.height;
+
+    // Draw animated video layer with transparency
+    if (animatedLayer.video.readyState >= 2) {
+      ctx.globalAlpha = animatedLayer.opacity;
+      
+      const pos1x = animatedLayer.x, pos1y = animatedLayer.y;
+      const pos2x = animatedLayer.x - canvas.width, pos2y = animatedLayer.y - canvas.height;
+      const pos3x = animatedLayer.x + canvas.width, pos3y = animatedLayer.y + canvas.height;
+
+      ctx.drawImage(animatedLayer.video, pos1x, pos1y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width) ctx.drawImage(animatedLayer.video, pos2x, pos1y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2) ctx.drawImage(animatedLayer.video, pos3x, pos1y, canvas.width, canvas.height);
+      if (pos2y > -canvas.height) ctx.drawImage(animatedLayer.video, pos1x, pos2y, canvas.width, canvas.height);
+      if (pos3y < canvas.height * 2) ctx.drawImage(animatedLayer.video, pos1x, pos3y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width && pos2y > -canvas.height) ctx.drawImage(animatedLayer.video, pos2x, pos2y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2 && pos3y < canvas.height * 2) ctx.drawImage(animatedLayer.video, pos3x, pos3y, canvas.width, canvas.height);
+      if (pos2x > -canvas.width && pos3y < canvas.height * 2) ctx.drawImage(animatedLayer.video, pos2x, pos3y, canvas.width, canvas.height);
+      if (pos3x < canvas.width * 2 && pos2y > -canvas.height) ctx.drawImage(animatedLayer.video, pos3x, pos2y, canvas.width, canvas.height);
+      
+      ctx.globalAlpha = 1.0; // Reset alpha
+    }
+  }
+
+  function drawTrees() {
+    const currentTime = performance.now();
+    
+    trees.forEach(tree => {
+      // Convert world position to screen position
+      const screenX = tree.worldX + worldOffset.x;
+      const screenY = tree.worldY + worldOffset.y;
+      
+      // Only draw if tree is visible on screen (with some margin)
+      if (screenX > -tree.width && screenX < canvas.width + tree.width &&
+          screenY > -tree.height && screenY < canvas.height + tree.height) {
+        
+        if (tree.growing && treeGrowVideo.readyState >= 2) {
+          // Check if growth animation should end (assuming 2 second duration)
+          if (currentTime - tree.startTime > 2000) {
+            tree.growing = false;
+            tree.grown = true;
+          } else {
+            // Draw growing animation
+            ctx.drawImage(treeGrowVideo, screenX, screenY, tree.width, tree.height);
+          }
+        } else if (tree.grown && treeGrowVideo.readyState >= 2) {
+          // Draw final frame of grown tree
+          ctx.drawImage(treeGrowVideo, screenX, screenY, tree.width, tree.height);
+        }
+      }
+    });
+  }
+
   function isMoving() {
     return keys.a || keys.d || keys.w || keys.s;
   }
 
   function draw() {
+    const currentTime = performance.now();
+    const deltaTime = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Move backgrounds if keys are held
-    if (keys.a) {
-      bgLayers.forEach(layer => {
-        layer.x += layer.speed * 12; // Adjust speed for smoothness
-      });
-    }
-    if (keys.d) {
-      bgLayers.forEach(layer => {
-        layer.x -= layer.speed * 12;
-      });
-    }
-    if (keys.w) {
-      bgLayers.forEach(layer => {
-        layer.y += layer.speed * 8; // Down (Konno up)
-      });
-    }
-    if (keys.s) {
-      bgLayers.forEach(layer => {
-        layer.y -= layer.speed * 8; // Up (Konno down)
-      });
+    // Track W key hold time for flying progression
+    if (keys.w && !konno.jumping && !konno.landing) {
+      wHoldTime += deltaTime;
+      
+      // First threshold: Start flying
+      if (wHoldTime >= FLYING_THRESHOLD && !konno.flying) {
+        startFlying();
+      }
+      // Second threshold: Transition to hold flying
+      else if (wHoldTime >= FLYING_HOLD_THRESHOLD && konno.flying && !konno.flyingHold) {
+        startFlyingHold();
+      }
     }
 
+    // Determine movement multipliers based on state
+    let bgSpeedMultiplier, animSpeedMultiplier;
+    
+    if (konno.flyingHold) {
+      // Ultra-fast speeds for extended flying mode
+      bgSpeedMultiplier = 120; // 3x faster than regular flying (40 * 3)
+      animSpeedMultiplier = 210; // 3x faster than regular flying (70 * 3)
+    } else if (konno.flying) {
+      // Fast speeds for initial flying mode
+      bgSpeedMultiplier = 40;
+      animSpeedMultiplier = 70;
+    } else {
+      // Normal speeds for walking/running
+      bgSpeedMultiplier = 20;
+      animSpeedMultiplier = 35;
+    }
+
+    // Move backgrounds and update world offset if keys are held (but not during landing)
+    if (!konno.landing) {
+      if (keys.a) { // Konno moves left
+        const moveAmount = 0.009 * bgSpeedMultiplier; // Use highest speed layer
+        bgLayers.forEach(layer => {
+          layer.x += layer.speed * bgSpeedMultiplier;
+        });
+        animatedLayer.x += animatedLayer.speed * animSpeedMultiplier;
+        worldOffset.x += moveAmount;
+      }
+      if (keys.d) { // Konno moves right
+        const moveAmount = 0.009 * bgSpeedMultiplier;
+        bgLayers.forEach(layer => {
+          layer.x -= layer.speed * bgSpeedMultiplier;
+        });
+        animatedLayer.x -= animatedLayer.speed * animSpeedMultiplier;
+        worldOffset.x -= moveAmount;
+      }
+      if (keys.w) { // Konno moves up
+        const moveAmount = 0.009 * (bgSpeedMultiplier * 0.75);
+        bgLayers.forEach(layer => {
+          layer.y += layer.speed * (bgSpeedMultiplier * 0.75);
+        });
+        animatedLayer.y += animatedLayer.speed * (animSpeedMultiplier * 0.75);
+        worldOffset.y += moveAmount;
+      }
+      if (keys.s) { // Konno moves down
+        const moveAmount = 0.009 * (bgSpeedMultiplier * 0.75);
+        bgLayers.forEach(layer => {
+          layer.y -= layer.speed * (bgSpeedMultiplier * 0.75);
+        });
+        animatedLayer.y -= animatedLayer.speed * (animSpeedMultiplier * 0.75);
+        worldOffset.y -= moveAmount;
+      }
+    }
+
+    // Draw layers in order: static backgrounds first, then animated layer, then trees
     drawParallax();
+    drawAnimatedLayer();
+    drawTrees();
 
-    if (!konno.jumping) {
+    // Handle video states - only change videos when not in special states
+    if (!konno.jumping && !konno.flying && !konno.flyingHold && !konno.landing) {
       if (isMoving()) {
         if (video.src.indexOf("Konno.mp4") === -1) {
           video.src = "Konno.mp4";
@@ -170,7 +436,9 @@
         }
       }
     }
+    // Don't change video states during landing - let the landing animation complete
 
+    // Draw Konno
     if (video.readyState >= 2) {
       ctx.save();
       if (!konno.facingRight) {
@@ -186,17 +454,35 @@
   }
 
   let loadedCount = 0;
+  let videosReady = 0;
+  
   bgLayers.forEach(layer => {
     layer.img.onload = () => {
       loadedCount++;
-      if (loadedCount === bgLayers.length) {
-        video.addEventListener('canplay', () => {
-          draw();
-        });
-        video.play();
+      if (loadedCount === bgLayers.length && videosReady === 2) {
+        draw();
       }
     };
   });
+
+  // Wait for both videos to be ready
+  video.addEventListener('canplay', () => {
+    videosReady++;
+    if (loadedCount === bgLayers.length && videosReady === 2) {
+      draw();
+    }
+  });
+
+  treeGrassVideo.addEventListener('canplay', () => {
+    videosReady++;
+    if (loadedCount === bgLayers.length && videosReady === 2) {
+      draw();
+    }
+  });
+
+  // Start playing videos
+  video.play();
+  treeGrassVideo.play();
 </script>
 
 </body>
