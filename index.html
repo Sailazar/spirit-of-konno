@@ -49,6 +49,11 @@
   Your browser does not support the video tag.
 </video>
 
+<video id="treeFullVideo" width="128" height="128" autoplay loop muted style="display:none;">
+  <source src="tree_full.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 <script>
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
@@ -56,11 +61,12 @@
   const treeGrassVideo = document.getElementById("treeGrassVideo");
   const flyingIndicator = document.getElementById("flyingIndicator");
   const treeGrowVideo = document.getElementById("treeGrowVideo");
+  const treeFullVideo = document.getElementById("treeFullVideo");
 
   const bgLayers = [
-    { src: 'layer1.png', x: 0, y: 0, speed: 0.003, img: new Image() },
-    { src: 'layer2.png', x: 0, y: 0, speed: 0.006, img: new Image() },
-    { src: 'layer3.png', x: 0, y: 0, speed: 0.009, img: new Image() }
+    { src: 'layer1.png', x: 0, y: 0, speed: 0.03, img: new Image() },
+    { src: 'layer2.png', x: 0, y: 0, speed: 0.06, img: new Image() },
+    { src: 'layer3.png', x: 0, y: 0, speed: 0.09, img: new Image() }
   ];
   bgLayers.forEach(layer => { layer.img.src = layer.src; });
 
@@ -83,7 +89,8 @@
     jumping: false,
     flying: false,
     flyingHold: false,
-    landing: false
+    landing: false,
+    special: false // New flag for special animation
   };
 
   // Tree system - stores trees in world coordinates
@@ -95,8 +102,8 @@
   // Track which keys are held down and timing
   const keys = { a: false, d: false, w: false, s: false };
   let wHoldTime = 0;
-  const FLYING_THRESHOLD = 1500; // Hold W for 1.5 seconds to start flying
-  const FLYING_HOLD_THRESHOLD = 6000; // Hold W for 3 seconds total to enter hold flying
+  const FLYING_THRESHOLD = 0; // Immediately start flying when W is pressed
+  const FLYING_HOLD_THRESHOLD = 4500; // Hold W for 4.5 seconds total to enter hold flying
   let lastFrameTime = performance.now();
 
   document.addEventListener("keydown", (e) => {
@@ -108,7 +115,13 @@
       keys.d = true;
       konno.facingRight = false;
     }
-    if (e.key === "w") keys.w = true;
+    if (e.key === "w") {
+      keys.w = true;
+      // Start flying immediately when W is pressed (if not jumping or landing)
+      if (!konno.jumping && !konno.landing && !konno.flying) {
+        startFlying();
+      }
+    }
     if (e.key === "s") {
       keys.s = true;
       // If flying and pressing S, land immediately
@@ -155,13 +168,52 @@
         height: 128,
         growing: true,
         grown: false,
-        startTime: performance.now()
+        startTime: performance.now(),
+        growthDuration: 4000 // 4 seconds for growth animation
       };
       trees.push(newTree);
       
       // Start the tree grow video
       treeGrowVideo.currentTime = 0;
       treeGrowVideo.play();
+
+      // Play Konno's special animation if not in a special state
+      if (!konno.jumping && !konno.flying && !konno.landing && !konno.special) {
+        konno.special = true;
+        video.src = "KonnoSpecial.mp4";
+        video.loop = false;
+        video.currentTime = 0;
+        video.play();
+        // When special animation ends, revert to appropriate animation
+        const handleSpecialEnd = () => {
+          video.removeEventListener('ended', handleSpecialEnd);
+          konno.special = false;
+          if (isMoving()) {
+            setAppropriateMovementVideo();
+          } else {
+            video.src = "KonnoStay.mp4";
+            video.loop = true;
+            video.currentTime = 0;
+            video.play();
+          }
+        };
+        video.addEventListener('ended', handleSpecialEnd);
+        // Fallback timeout in case 'ended' doesn't fire (use 7s as default)
+        setTimeout(() => {
+          if (konno.special) {
+            video.removeEventListener('ended', handleSpecialEnd);
+            konno.special = false;
+            if (isMoving()) {
+              setAppropriateMovementVideo();
+            } else {
+              video.src = "KonnoStay.mp4";
+              video.loop = true;
+              video.currentTime = 0;
+              video.play();
+            }
+          }
+        }, 7000);
+      }
     }
   });
 
@@ -221,13 +273,13 @@
           konno.landing = false;
           // Check if moving to determine next video
           if (isMoving()) {
-            video.src = "Konno.mp4";
+            setAppropriateMovementVideo();
           } else {
             video.src = "KonnoStay.mp4";
+            video.loop = true;
+            video.currentTime = 0;
+            video.play();
           }
-          video.loop = true;
-          video.currentTime = 0;
-          video.play();
         }
       };
       
@@ -240,15 +292,54 @@
           konno.landing = false;
           // Check if moving to determine next video
           if (isMoving()) {
-            video.src = "Konno.mp4";
+            setAppropriateMovementVideo();
           } else {
             video.src = "KonnoStay.mp4";
+            video.loop = true;
+            video.currentTime = 0;
+            video.play();
           }
-          video.loop = true;
-          video.currentTime = 0;
-          video.play();
         }
       }, 4000); // Increased timeout duration for safety
+    }
+  }
+
+  function setAppropriateMovementVideo() {
+    let newVideoSrc = "";
+    
+    // Check for diagonal movement combinations
+    if (keys.w && keys.d) {
+      // Moving forward and right - assuming you have this file
+      newVideoSrc = "KonnoForwardRight.mp4";
+    } else if (keys.w && keys.a) {
+      // Moving forward and left - assuming you have this file
+      newVideoSrc = "KonnoForwardLeft.mp4";
+    } else if (keys.s && keys.d) {
+      // Moving backward and right - assuming you have this file
+      newVideoSrc = "KonnoBackwardRight.mp4";
+    } else if (keys.s && keys.a) {
+      // Moving backward and left - assuming you have this file
+      newVideoSrc = "KonnoBackwardLeft.mp4";
+    } else if (keys.w) {
+      // Moving only forward - assuming you have this file
+      newVideoSrc = "KonnoForward.mp4";
+    } else if (keys.s) {
+      // Moving only backward - assuming you have this file
+      newVideoSrc = "KonnoBackward.mp4";
+    } else if (keys.a || keys.d) {
+      // Moving only left or right - use default side movement
+      newVideoSrc = "Konno.mp4";
+    } else {
+      // Not moving
+      newVideoSrc = "KonnoStay.mp4";
+    }
+    
+    // Only change video if it's different from current
+    if (video.src.indexOf(newVideoSrc) === -1) {
+      video.src = newVideoSrc;
+      video.loop = true;
+      video.currentTime = 0;
+      video.play();
     }
   }
 
@@ -319,18 +410,25 @@
       if (screenX > -tree.width && screenX < canvas.width + tree.width &&
           screenY > -tree.height && screenY < canvas.height + tree.height) {
         
-        if (tree.growing && treeGrowVideo.readyState >= 2) {
-          // Check if growth animation should end (assuming 2 second duration)
-          if (currentTime - tree.startTime > 2000) {
+        if (tree.growing) {
+          // Check if growth animation should end
+          if (currentTime - tree.startTime > tree.growthDuration) {
             tree.growing = false;
             tree.grown = true;
+            // Start the full tree video when growth completes
+            treeFullVideo.currentTime = 0;
+            treeFullVideo.play();
           } else {
             // Draw growing animation
-            ctx.drawImage(treeGrowVideo, screenX, screenY, tree.width, tree.height);
+            if (treeGrowVideo.readyState >= 2) {
+              ctx.drawImage(treeGrowVideo, screenX, screenY, tree.width, tree.height);
+            }
           }
-        } else if (tree.grown && treeGrowVideo.readyState >= 2) {
-          // Draw final frame of grown tree
-          ctx.drawImage(treeGrowVideo, screenX, screenY, tree.width, tree.height);
+        } else if (tree.grown) {
+          // Draw the full grown tree video (looping)
+          if (treeFullVideo.readyState >= 2) {
+            ctx.drawImage(treeFullVideo, screenX, screenY, tree.width, tree.height);
+          }
         }
       }
     });
@@ -421,20 +519,8 @@
     drawTrees();
 
     // Handle video states - only change videos when not in special states
-    if (!konno.jumping && !konno.flying && !konno.flyingHold && !konno.landing) {
-      if (isMoving()) {
-        if (video.src.indexOf("Konno.mp4") === -1) {
-          video.src = "Konno.mp4";
-          video.loop = true;
-          video.play();
-        }
-      } else {
-        if (video.src.indexOf("KonnoStay.mp4") === -1) {
-          video.src = "KonnoStay.mp4";
-          video.loop = true;
-          video.play();
-        }
-      }
+    if (!konno.jumping && !konno.flying && !konno.flyingHold && !konno.landing && !konno.special) {
+      setAppropriateMovementVideo();
     }
     // Don't change video states during landing - let the landing animation complete
 
@@ -459,23 +545,30 @@
   bgLayers.forEach(layer => {
     layer.img.onload = () => {
       loadedCount++;
-      if (loadedCount === bgLayers.length && videosReady === 2) {
+      if (loadedCount === bgLayers.length && videosReady === 3) {
         draw();
       }
     };
   });
 
-  // Wait for both videos to be ready
+  // Wait for all three videos to be ready
   video.addEventListener('canplay', () => {
     videosReady++;
-    if (loadedCount === bgLayers.length && videosReady === 2) {
+    if (loadedCount === bgLayers.length && videosReady === 3) {
       draw();
     }
   });
 
   treeGrassVideo.addEventListener('canplay', () => {
     videosReady++;
-    if (loadedCount === bgLayers.length && videosReady === 2) {
+    if (loadedCount === bgLayers.length && videosReady === 3) {
+      draw();
+    }
+  });
+
+  treeFullVideo.addEventListener('canplay', () => {
+    videosReady++;
+    if (loadedCount === bgLayers.length && videosReady === 3) {
       draw();
     }
   });
@@ -483,6 +576,7 @@
   // Start playing videos
   video.play();
   treeGrassVideo.play();
+  treeFullVideo.play();
 </script>
 
 </body>
